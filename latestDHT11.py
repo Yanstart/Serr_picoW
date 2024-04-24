@@ -68,10 +68,8 @@ class DHT11:
         return [str(temperature),str(humidity)]
 
 
-# The PCF8574 has a jumper selectable address: 0x20 - 0x27         
-DEFAULT_I2C_ADDR = 0x27#0X27#                                      #define I2C Address
 
-dht = DHT11(34)                                                    #define DHT11 pin function:GP15
+dht = DHT11(28)                                                    #define DHT11 pin function:GP15
 def readTaHData():
     DATA = dht.read_data()    
     t = DATA[0]                                                    #read Temp.& Humidity
