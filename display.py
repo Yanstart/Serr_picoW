@@ -1,58 +1,60 @@
 import machine
-import time
+import utime
 
-class Display:
-    def __init__(self):
-        # Configuration des broches GPIO
-        self.segments = (1, 2, 4, 5)
-        self.selection_transistors = (19, 20)  # Assumant que ce sont les broches que vous avez spécifiées pour les transistors
-        for segment in self.segments:
-            machine.Pin(segment, machine.Pin.OUT)
-        for transistor in self.selection_transistors:
-            machine.Pin(transistor, machine.Pin.OUT)
+# Configurer les broches du Raspberry Pi Pico
+# Pins connectées au décodeur 74LS47
+pin_a = machine.Pin(1, machine.Pin.OUT)
+pin_b = machine.Pin(2, machine.Pin.OUT)
+pin_c = machine.Pin(4, machine.Pin.OUT)
+pin_d = machine.Pin(5, machine.Pin.OUT)
 
-        # Dictionnaire des configurations des segments pour chaque chiffre de 0 à 9
-        self.digits = {
-            0: (1, 1, 1, 1),
-            1: (0, 1, 1, 0),
-            2: (1, 1, 0, 1),
-            3: (1, 1, 1, 0),
-            4: (0, 1, 1, 0),
-            5: (1, 0, 1, 1),
-            6: (1, 0, 1, 1),
-            7: (1, 1, 1, 0),
-            8: (1, 1, 1, 1),
-            9: (1, 1, 1, 0)
-        }
+# Pins connectées aux transistors pour les afficheurs 7 segments
+transistor_units = machine.Pin(19, machine.Pin.OUT)
+transistor_tens = machine.Pin(20, machine.Pin.OUT)
 
-        self.last_temperature = None  # Stocke la dernière température affichée
+# Définition des séquences pour chaque chiffre sur les 7 segments
+digit_sequences = {
+    0: (0, 0, 0, 0),
+    1: (0, 0, 0, 1),
+    2: (0, 0, 1, 0),
+    3: (0, 0, 1, 1),
+    4: (0, 1, 0, 0),
+    5: (0, 1, 0, 1),
+    6: (0, 1, 1, 0),
+    7: (0, 1, 1, 1),
+    8: (1, 0, 0, 0),
+    9: (1, 0, 0, 1),
+}
 
-    def display_temperature(self, temperature):
-        # Vérifie si la température est différente de celle précédemment affichée
-        if temperature != self.last_temperature:
-            # Divise la température en dizaines et unités
-            tens = temperature // 10
-            units = temperature % 10
+# Fonction pour afficher un chiffre sur les 7 segments
+def display_digit(digit):
+    sequence = digit_sequences.get(digit, (0, 0, 0, 0))
+    pin_a.value(sequence[0])
+    pin_b.value(sequence[1])
+    pin_c.value(sequence[2])
+    pin_d.value(sequence[3])
 
-            # Allume les segments correspondants aux dizaines
-            pin_a = machine.Pin(1, machine.Pin.OUT)
-            pin_a.value(1)  # Active le transistor pour le premier afficheur
-            for segment, state in zip(self.segments, self.digits[tens]):
-                machine.Pin(segment, machine.Pin.OUT).value(state)
-            time.sleep(0.001)
-            pin_a.value(0)  # Désactive le transistor pour le premier afficheur
+# Fonction pour basculer entre les chiffres des unités et des dizaines
+def toggle_digits():
+    transistor_units.value(1)
+    transistor_tens.value(0)
+    utime.sleep_ms(5)  # Calibre le temps de basculement
+    transistor_units.value(0)
+    transistor_tens.value(1)
 
-            # Allume les segments correspondants aux unités
-            pin_b = machine.Pin(5, machine.Pin.OUT)
-            pin_b.value(1)  # Active le transistor pour le deuxième afficheur
-            for segment, state in zip(self.segments, self.digits[units]):
-                machine.Pin(segment, machine.Pin.OUT).value(state)
-            time.sleep(0.001)
-            pin_b.value(0)  # Désactive le transistor pour le deuxième afficheur
-
-            # Stocke la température actuelle comme dernière température affichée
-            self.last_temperature = temperature
-
-        # Éteint tous les segments
-        for segment in self.segments:
-            machine.Pin(segment, machine.Pin.OUT).value(0)
+# Boucle principale pour afficher les chiffres en boucle
+while True:
+    # Récupérer le nombre à afficher depuis le terminal
+    number = int(input("Entrez un nombre entre 0 et 99 : "))
+    
+    # Afficher les chiffres des unités et des dizaines
+    tens = number // 10
+    units = number % 10
+    
+    # Afficher le chiffre des dizaines
+    display_digit(tens)
+    toggle_digits()
+    
+    # Afficher le chiffre des unités
+    display_digit(units)
+    toggle_digits()
