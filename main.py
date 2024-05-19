@@ -6,13 +6,13 @@ import network
 import socket
 import _thread
 
-# Pins connectées au décodeur 74LS47
+# Définition des pins pour le décodeur 74LS47
 pin_a = Pin(1, Pin.OUT)
 pin_b = Pin(2, Pin.OUT)
 pin_c = Pin(4, Pin.OUT)
 pin_d = Pin(5, Pin.OUT)
 
-# Pins connectées aux transistors pour les afficheurs 7 segments
+# Définition des pins pour les transistors des afficheurs 7 segments
 transistor_units = Pin(19, Pin.OUT)
 transistor_tens = Pin(20, Pin.OUT)
 
@@ -30,7 +30,7 @@ digit_sequences = {
     9: (1, 0, 0, 1),
 }
 
-# Fonction pour connecter au Wi-Fi
+# Fonction pour se connecter au Wi-Fi
 def connect_to_wifi(ssid, password):
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
@@ -73,7 +73,7 @@ class Display:
             display_digit(units)
             toggle_digits()
 
-# Classe pour le contrôle du servo
+# Classe pour le contrôle du servo moteur
 class ServoControl:
     def __init__(self, pin):
         self.servo = PWM(Pin(pin))
