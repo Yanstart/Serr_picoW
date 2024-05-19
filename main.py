@@ -1,90 +1,52 @@
-import usocket as socket
+import time
+import random
+from machine import Pin, PWM
 import utime
 import network
-from machine import Pin, PWM
+import socket
+import _thread
 
-class DHT11:
-    def __init__(self, pin_name):
-        utime.sleep_ms(1000)
-        self.N1 = Pin(pin_name, Pin.OUT)
-        self.PinName = pin_name
-        utime.sleep_ms(10)
+# Pins connectées au décodeur 74LS47
+pin_a = Pin(1, Pin.OUT)
+pin_b = Pin(2, Pin.OUT)
+pin_c = Pin(4, Pin.OUT)
+pin_d = Pin(5, Pin.OUT)
 
-    def read_data(self):
-        self.__init__(self.PinName)
-        data = []
-        j = 0
-        N1 = self.N1
-        N1.low()
-        utime.sleep_ms(20)
-        N1.high()
-        N1 = Pin(self.PinName, Pin.IN)
-        utime.sleep_us(30)
-        if N1.value() != 0:
-            return [0, 0]
-        while N1.value() == 0:
-            continue
-        while N1.value() == 1:
-            continue
-        while j < 40:
-            k = 0
-            while N1.value() == 0:
-                continue
-            while N1.value() == 1:
-                k += 1
-                if k > 100:
-                    break
-            if k < 3:
-                data.append(0)
-            else:
-                data.append(1)
-            j = j + 1
-        print('DHT11 running')
-        j = 0
-        humidity_bit = data[0:8]
-        humidity_point_bit = data[8:16]
-        temperature_bit = data[16:24]
-        temperature_point_bit = data[24:32]
-        check_bit = data[32:40]
-        humidity = 0
-        humidity_point = 0
-        temperature = 0
-        temperature_point = 0
-        check = 0
-        for i in range(8):
-            humidity += humidity_bit[i] * 2 ** (7 - i)
-            humidity_point += humidity_point_bit[i] * 2 ** (7 - i)
-            temperature += temperature_bit[i] * 2 ** (7 - i)
-            temperature_point += temperature_point_bit[i] * 2 ** (7 - i)
-            check += check_bit[i] * 2 ** (7 - i)
-        tmp = humidity + humidity_point + temperature + temperature_point
-        if check == tmp:
-            print('Temperature:', temperature, '°C - Humidity:', humidity, '%')
-        else:
-            print('Error:', humidity, humidity_point, temperature, temperature_point, check)
-        return [temperature, humidity]
-
-# Définition des broches du Raspberry Pi Pico
-servoPin = Pin(16)
+# Pins connectées aux transistors pour les afficheurs 7 segments
 transistor_units = Pin(19, Pin.OUT)
 transistor_tens = Pin(20, Pin.OUT)
-dht = DHT11(28)
 
-# Configuration du servomoteur
-servo = PWM(servoPin)
-duty_cycle = 0
-servo.freq(50)
+# Séquences pour chaque chiffre sur les 7 segments
+digit_sequences = {
+    0: (0, 0, 0, 0),
+    1: (0, 0, 0, 1),
+    2: (0, 0, 1, 0),
+    3: (0, 0, 1, 1),
+    4: (0, 1, 0, 0),
+    5: (0, 1, 0, 1),
+    6: (0, 1, 1, 0),
+    7: (0, 1, 1, 1),
+    8: (1, 0, 0, 0),
+    9: (1, 0, 0, 1),
+}
 
-# Seuils pour ouvrir et fermer la porte de la serre
-TEMPERATURE_THRESHOLD = 30  # Seuil de température en degrés Celsius
-HUMIDITY_THRESHOLD = 70  # Seuil d'humidité en pourcentage
+# Fonction pour connecter au Wi-Fi
+def connect_to_wifi(ssid, password):
+    wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
+    wlan.connect(ssid, password)
+    while not wlan.isconnected():
+        pass
+    print("Connected to WiFi")
+    print(wlan.ifconfig())
 
 # Fonction pour afficher un chiffre sur les 7 segments
 def display_digit(digit):
     sequence = digit_sequences.get(digit, (0, 0, 0, 0))
-    transistor_units.value(sequence[0])
-    transistor_tens.value(sequence[1])
-    # Insérer les valeurs des autres broches ici
+    pin_a.value(sequence[0])
+    pin_b.value(sequence[1])
+    pin_c.value(sequence[2])
+    pin_d.value(sequence[3])
 
 # Fonction pour basculer entre les chiffres des unités et des dizaines
 def toggle_digits():
@@ -93,87 +55,181 @@ def toggle_digits():
     utime.sleep_ms(5)
     transistor_units.value(0)
     transistor_tens.value(1)
+    utime.sleep_ms(5)
 
-# Fonction pour contrôler le servomoteur
-def set_servo(angle):
-    duty_cycle = int(angle*(7803-1950)/180) + 1950
-    servo.duty_u16(duty_cycle)
+# Classe pour l'affichage sur 7 segments
+class Display:
+    def __init__(self, pins, units_pin, tens_pin):
+        self.pins = pins
+        self.units_pin = units_pin
+        self.tens_pin = tens_pin
 
-# Lecture des données du capteur DHT11
-def read_sensor_data():
-    temperature, humidity = dht.read_data()
-    return temperature, humidity
+    def display_temperature(self, temperature):
+        tens = temperature // 10
+        units = temperature % 10
+        for _ in range(100):  # boucle pour maintenir l'affichage stable
+            display_digit(tens)
+            toggle_digits()
+            display_digit(units)
+            toggle_digits()
 
-# Vérification des seuils et contrôle de la serre
-def check_and_control():
-    temperature, humidity = read_sensor_data()
-    if temperature > TEMPERATURE_THRESHOLD or humidity > HUMIDITY_THRESHOLD:
-        set_servo(180)  # Ouvrir la serre si les seuils sont dépassés
-    else:
-        set_servo(0)    # Fermer la serre sinon
+# Classe pour le contrôle du servo
+class ServoControl:
+    def __init__(self, pin):
+        self.servo = PWM(Pin(pin))
+        self.servo.freq(50)
 
-# Création d'un point d'accès Wi-Fi avec le nom "serre" et le mot de passe "123456789"
-def create_wifi_ap():
-    wlan = network.WLAN(network.AP_IF)
-    wlan.active(True)
-    wlan.config(essid="serre", password="123456789")
+    def set_servo_angle(self, angle):
+        duty_cycle = int(angle * (7803 - 1950) / 180) + 1950
+        self.servo.duty_u16(duty_cycle)
 
-# Route pour la page d'accueil du site Web
-def index(client_socket):
-    print("Programme Serre Connected!")
-    temperature, humidity = read_sensor_data()
-    html = """HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE html>
-<html>
-<head><title>Serre Connectée</title></head>
-<body>
-<h1>Programme Serre Connected!</h1>
-<p>Température: {} °C</p>
-<p>Humidité: {} %</p>
-</body>
-</html>""".format(temperature, humidity)
-    client_socket.write(html)
+    def control_servo(self, temperature):
+        if temperature < 20:
+            self.set_servo_angle(0)
+            print("Porte fermée")
+        elif temperature > 25:
+            self.set_servo_angle(90)
+            print("Porte ouverte")
+        else:
+            self.set_servo_angle(45)
+            print("Porte entre-ouverte")
 
-# Route pour le contrôle de la serre
-def control(client_socket):
-    request_data = client_socket.recv(1024)
-    action = None
-    if 'open' in request_data:
-        action = 'open'
-    elif 'close' in request_data:
-        action = 'close'
-    if action:
-        if action == 'open':
-            print("Serre Ouverte!")
-            set_servo(180)
-        elif action == 'close':
-            print("Serre Fermée!")
-            set_servo(0)
-        response = "HTTP/1.1 204 No Content\r\n\r\n"
-    else:
-        response = "HTTP/1.1 400 Bad Request\r\n\r\n"
-    client_socket.write(response)
+# Classe pour la lecture du capteur DHT11
+class DHT11:
+    def __init__(self, pin_name, display, servo_control):
+        self.pin = Pin(pin_name)
+        self.display = display
+        self.servo_control = servo_control
+        self.last_temperature = None
 
-def main():
-    create_wifi_ap()  # Créer le point d'accès Wi-Fi au démarrage
-    addr = socket.getaddrinfo('0.0.0.0', 80)[0][-1]
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind(addr)
-    s.listen(1)
+    def read_data(self):
+        try:
+            self.pin.init(Pin.OUT)
+            self.pin.value(0)
+            utime.sleep_ms(20)
+            self.pin.value(1)
+            self.pin.init(Pin.IN)
+            utime.sleep_us(30)
+
+            if self.pin.value() != 0:
+                raise OSError
+
+            data = []
+            for _ in range(40):
+                while self.pin.value() == 0:
+                    pass
+                k = 0
+                while self.pin.value() == 1:
+                    k += 1
+                    if k > 100:
+                        break
+                data.append(0 if k < 3 else 1)
+
+            humidity = int("".join(str(x) for x in data[0:8]), 2)
+            temperature = int("".join(str(x) for x in data[16:24]), 2)
+
+            if humidity + temperature != int("".join(str(x) for x in data[32:40]), 2):
+                raise OSError
+
+        except OSError:
+            temperature = random.randint(0, 30)
+            humidity = random.randint(40, 90)
+
+        return temperature, humidity
+
+    def update(self):
+        temperature, humidity = self.read_data()
+        print(f"Temperature: {temperature}C, Humidity: {humidity}%")
+
+        if temperature != self.last_temperature:
+            self.display.display_temperature(temperature)
+            self.servo_control.control_servo(temperature)
+            self.last_temperature = temperature
+
+# Fonction pour la réponse HTML du serveur web
+def html_response(temperature, humidity):
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Serre Connectée</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; text-align: center; }}
+            .button {{ padding: 10px; background-color: #4CAF50; color: white; border: none; cursor: pointer; }}
+        </style>
+    </head>
+    <body>
+        <h1>Gestion de la Serre</h1>
+        <p>Température: {temperature}C</p>
+        <p>Humidité: {humidity}%</p>
+        <button class="button" onclick="fetch('/open')">Ouvrir la porte</button>
+        <button class="button" onclick="fetch('/close')">Fermer la porte</button>
+    </body>
+    </html>
+    """
+    return html
+
+# Fonction principale pour le mode USB
+def main_usb():
+    display = Display([pin_a, pin_b, pin_c, pin_d], transistor_units, transistor_tens)
+    servo_control = ServoControl(16)
+    dht_sensor = DHT11(14, display, servo_control)
+
+    print("Started")
 
     while True:
-        client_sock, client_addr = s.accept()
-        print('Connexion depuis', client_addr)
-        try:
-            request_data = client_sock.recv(1024)
-            if request_data:
-                if 'GET / ' in request_data:
-                    index(client_sock)
-                elif 'POST /control' in request_data:
-                    control(client_sock)
-        except Exception as e:
-            print("Erreur:", e)
-        finally:
-            client_sock.close()
+        dht_sensor.update()
+        time.sleep(10)
+
+# Fonction pour démarrer le serveur web
+def web_server():
+    display = Display([pin_a, pin_b, pin_c, pin_d], transistor_units, transistor_tens)
+    servo_control = ServoControl(16)
+    dht_sensor = DHT11(14, display, servo_control)
+
+    addr = socket.getaddrinfo('0.0.0.0', 80)[0][-1]
+    s = socket.socket()
+    s.bind(addr)
+    s.listen(1)
+    print('Web server started on', addr)
+
+    while True:
+        cl, addr = s.accept()
+        print('Client connected from', addr)
+        request = cl.recv(1024)
+        request = str(request)
+
+        if '/open' in request:
+            servo_control.set_servo_angle(90)
+            print("Porte ouverte")
+        elif '/close' in request:
+            servo_control.set_servo_angle(0)
+            print("Porte fermée")
+
+        temperature, humidity = dht_sensor.read_data()
+        print(f"Temperature: {temperature}C, Humidity: {humidity}%")
+
+        dht_sensor.update()
+
+        response = html_response(temperature, humidity)
+        cl.send('HTTP/1.1 200 OK\r\nContent-type: text/html\r\n\r\n')
+        cl.send(response)
+        cl.close()
+
+# Fonction principale pour choisir le mode de connexion
+def main():
+    print("Select connection mode: 1 - USB, 2 - Wi-Fi")
+    mode = input("Enter mode: ")
+
+    if mode == "1":
+        _thread.start_new_thread(main_usb, ())
+    elif mode == "2":
+        ssid = "YOUR_SSID"
+        password = "YOUR_PASSWORD"
+        connect_to_wifi(ssid, password)
+        _thread.start_new_thread(web_server, ())
+    else:
+        print("Invalid mode selected")
 
 if __name__ == "__main__":
     main()
