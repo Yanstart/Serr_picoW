@@ -38,7 +38,8 @@ def connect_to_wifi(ssid, password):
     while not wlan.isconnected():
         pass
     print("Connected to WiFi")
-    print(wlan.ifconfig())
+    print("Adresse IP :", wlan.ifconfig()[0])
+    return wlan
 
 # Fonction pour afficher un chiffre sur les 7 segments
 def display_digit(digit):
@@ -154,16 +155,22 @@ def html_response(temperature, humidity):
     <head>
         <title>Serre Connectée</title>
         <style>
-            body {{ font-family: Arial, sans-serif; text-align: center; }}
-            .button {{ padding: 10px; background-color: #4CAF50; color: white; border: none; cursor: pointer; }}
+            body {{ font-family: Arial, sans-serif; text-align: center; background-color: #f0f0f0; }}
+            h1 {{ color: #333; }}
+            p {{ font-size: 1.2em; }}
+            .container {{ margin-top: 50px; }}
+            .button {{ padding: 15px 25px; background-color: #4CAF50; color: white; border: none; cursor: pointer; font-size: 1em; margin: 5px; }}
+            .button:hover {{ background-color: #45a049; }}
         </style>
     </head>
     <body>
-        <h1>Gestion de la Serre</h1>
-        <p>Température: {temperature}C</p>
-        <p>Humidité: {humidity}%</p>
-        <button class="button" onclick="fetch('/open')">Ouvrir la porte</button>
-        <button class="button" onclick="fetch('/close')">Fermer la porte</button>
+        <div class="container">
+            <h1>Gestion de la Serre</h1>
+            <p>Température: {temperature}C</p>
+            <p>Humidité: {humidity}%</p>
+            <button class="button" onclick="fetch('/open')">Ouvrir la porte</button>
+            <button class="button" onclick="fetch('/close')">Fermer la porte</button>
+        </div>
     </body>
     </html>
     """
@@ -182,22 +189,24 @@ def main_usb():
         time.sleep(10)
 
 # Fonction pour démarrer le serveur web
-def web_server():
+def web_server(wlan):
     display = Display([pin_a, pin_b, pin_c, pin_d], transistor_units, transistor_tens)
     servo_control = ServoControl(16)
     dht_sensor = DHT11(14, display, servo_control)
 
+    # Configuration du serveur web
     addr = socket.getaddrinfo('0.0.0.0', 80)[0][-1]
-    s = socket.socket()
-    s.bind(addr)
-    s.listen(1)
-    print('Web server started on', addr)
+    server_socket = socket.socket()
+    server_socket.bind(addr)
+    server_socket.listen(1)
+    print('Serveur web en écoute sur http://{}:80'.format(wlan.ifconfig()[0]))
 
     while True:
-        cl, addr = s.accept()
-        print('Client connected from', addr)
-        request = cl.recv(1024)
-        request = str(request)
+        client, addr = server_socket.accept()
+        print('Client connecté depuis', addr)
+        request = client.recv(1024).decode()
+        print("Requête reçue :")
+        print(request)
 
         if '/open' in request:
             servo_control.set_servo_angle(90)
@@ -212,9 +221,9 @@ def web_server():
         dht_sensor.update()
 
         response = html_response(temperature, humidity)
-        cl.send('HTTP/1.1 200 OK\r\nContent-type: text/html\r\n\r\n')
-        cl.send(response)
-        cl.close()
+        client.send('HTTP/1.1 200 OK\r\nContent-type: text/html\r\n\r\n')
+        client.send(response.encode())
+        client.close()
 
 # Fonction principale pour choisir le mode de connexion
 def main():
@@ -224,10 +233,10 @@ def main():
     if mode == "1":
         _thread.start_new_thread(main_usb, ())
     elif mode == "2":
-        ssid = "YOUR_SSID"
-        password = "YOUR_PASSWORD"
-        connect_to_wifi(ssid, password)
-        _thread.start_new_thread(web_server, ())
+        ssid = "Yanstart"
+        password = "ciscorootmyhey"
+        wlan = connect_to_wifi(ssid, password)
+        _thread.start_new_thread(web_server, (wlan,))
     else:
         print("Invalid mode selected")
 
